@@ -1,0 +1,191 @@
+---
+title: "Weight Lifting Exercise"
+output: html_document
+---
+BACKGROUND:
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. 
+
+More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+QUESTION: 
+
+By processing data gathered from accelerometers on the belt, forearm, arm, and dumbell of the participants in a machine learning algorithm, the question is can the appropriate activity quality (class A-E) be predicted?
+
+GOAL: 
+
+The goal of this project is to predict the manner in which they did the exercise.
+
+DATA: 
+
+The training data for this project was downloaded fom: 
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The testing data for this project was downloaded from: 
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har.
+
+ALGORITHM:
+
+1) With lots of data available to analyze (close to 20,000 observations), I chose to split the training and testing data set in a 60/40 ratio. 12,000 observations in the training data set should be ample for training the model, but having an ample testing size will help prevent the prediction model from over-fitting.
+2) The following columns will be removed from the data in order to minimize noise:
+  A) Columns with lots of NA or missing values
+  B) Columns with zero or near-zero variance
+  C) ID columns
+3) A decision tree and a random forest model will be used to analyze and predict the data
+4) The more accurate model will be used on the final testing data of 20 cases
+
+ASSUMPTIONS:
+
+Given the nature of the data not having a logical flow/structure, I expect the decision tree model to perform
+poorly compared to the random forest model.
+
+
+```{r}
+# Load required libraries
+library(AppliedPredictiveModeling)
+library(caret)
+library(rattle)
+library(randomForest)
+library(RColorBrewer)
+library(rpart)
+library(rpart.plot)
+
+# Reproducibility
+set.seed(123)
+
+# Input the data
+# Assign URL links
+url_training <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+url_testing  <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+# Read csv files in
+
+training_data <- read.csv(url(url_training), na.strings=c("NA",""))
+testing_data <- read.csv(url(url_testing), na.strings=c("NA",""))
+
+# Create data partitions for training and testing
+# With lots of records in the data, a 60/40 split seems appropriate
+
+inTrain <- createDataPartition(y=training_data$classe, p=0.6, list=FALSE)
+training <- training_data[inTrain, ]
+testing <- training_data[-inTrain, ]
+
+# Examine training and testing data structures
+dim(training)
+dim(testing)
+
+# Transformation: Remove undesired variables
+
+# Remove variables with too many NA values.
+# Set threshold of NA values to remove at 50% or more
+
+# Output training dataset into another table and remove NA columns from it
+training2 <- training 
+# Loop through each column in the training dataset
+for(i in 1:length(training)) {
+  # Flag variables that have 50% or more NAs
+  if( sum( is.na( training[, i] ) ) /nrow(training) >= .5 ) { 
+    for(j in 1:length(training2)) {
+      # Increment j until variable match found with i
+      if( length( grep(names(training[i]), names(training2)[j]) ) ==1)  {
+        # Remove the column with high NA frequencies
+        training2 <- training2[ , -j] 
+      }   
+    } 
+  }
+}
+# Check number of records and variables in output
+dim(training2)
+
+# Identify Near-Zero Variance variables in order to remove from training set
+NearZeroVariables <- nearZeroVar(training2, saveMetrics=TRUE)
+
+# Capture Near-Zero Variance variables in a list and ID variable "x"
+NearZeroList <- names(training2) %in% c("X","new_window")
+
+
+# Remove Near-Zero Variance variables from training set
+training3 <- training2[!NearZeroList]
+# Check number of records and variables in output
+dim(training3)
+
+# Adjust the testing data set to reflect the same table structure as the training data set
+# A mismatching structure will cause prediciton model to fail
+training3_var_list <- colnames(training3)
+# Remove classe column which is the 58th column in the dataset
+training3_var_list2 <- colnames(training3[, -58])
+testing3 <- testing[training3_var_list]
+testing_data2 <- testing_data[training3_var_list2]
+
+# Check number of records and variables in the testing dataset output
+dim(testing3)
+
+# Ensure predictors in testing set are the same class as training set by forcing the
+# columns in the testing dataset to have the same class as the training dataset
+for (i in 1:length(testing_data2) ) {
+  for(j in 1:length(training3)) {
+    if( length( grep(names(training3[i]), names(testing_data2)[j]) ) ==1)  {
+      # Force class override
+      class(testing_data2[j]) <- class(training3[i])
+    }      
+  }      
+}
+
+# Ensure same class of predictors by appending training_data to testing_data
+testing_data2 <- rbind(training3[2, -58] , testing_data2) 
+# Remove first row
+testing_data2 <- testing_data2[-1,]
+
+
+# Carry out a Decision Tree Model
+dtree_model<- rpart(classe ~ ., data=training3, method="class")
+# Produce graph of the decision tree model via the fancyRpartPlot function
+fancyRpartPlot(dtree_model)
+
+
+# Predicting using Decision Trees:
+  dtree_prediction <- predict(dtree_model, testing3, type = "class")
+# Calculate cross-tabulation of observed and predicted classes
+  confusionMatrix(dtree_prediction, testing3$classe)
+
+# The decision tree model has an 86.87% accuracy predicting the classe variable in the testing dataset. Most
+# of the misclassifications were from predicting Class E vs Class D and Class C vs Class B. The p-value of
+# 2.2 e-16 strongly indicates the decision tree model performs much better at predicting the class than with
+# not having any information at all.
+
+
+# Carry out a Random Forest Model
+rf_model <- randomForest(classe ~. , data=training3)
+# Predicting using Random Forests:
+  rf_prediction <- predict(rf_model, testing3, type = "class")  
+# Calculate cross-tabulation of observed and predicted classes
+  confusionMatrix(rf_prediction, testing3$classe)
+
+# The random forest model has an amazing 99.87% accuracy at predicting the classe variable in the testing
+# dataset and is far superior to the decision tree's 86.87% accuracy. Without a doubt, the random forest
+# model will be used to predict the classe variable on the 20 test cases. 
+# 
+# Given, the random forest's superior prediction availability from the cross-validation of the testing data, 
+# I expect the out-of-sample error to be less than or equal to 5% on the 20 test cases, in other words, 
+# I expect it to get at least 19 out of 20 predictions right.
+
+# Apply machine learning algorithm to the 20 test cases and print results
+rf_prediction_answers <- predict(rf_model,newdata=testing_data2)
+print(rf_prediction_answers)
+
+
+# Output Random Forest Predictions for the Project Submission portion  
+  pml_write_files = function(x){
+    n = length(x)
+    for(i in 1:n){
+      filename = paste0("problem_id_",i,".txt")
+      write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+    }
+  }
+  pml_write_files(rf_prediction_answers)
+
+```
